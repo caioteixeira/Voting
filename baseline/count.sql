@@ -1,0 +1,1 @@
+select target, count(*) from votes group by target
