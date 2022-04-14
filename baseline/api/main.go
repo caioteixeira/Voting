@@ -77,5 +77,5 @@ func main() {
 	router.GET("/voteCount", getVoteCount)
 	router.POST("/tasks", postTask)
 
-	router.Run("localhost:8080")
+	router.Run("0.0.0.0:8080")
 }
