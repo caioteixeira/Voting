@@ -7,19 +7,15 @@ import (
 	"os"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gofrs/uuid"
+	"github.com/jackc/pgtype"
+	pgtypeuuid "github.com/jackc/pgtype/ext/gofrs-uuid"
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
-type task struct {
-	ID          string `json:"id"`
-	Description string `json:"description"`
-	Completed   bool   `json:"completed"`
-}
-
-var tasks = []task{
-	{ID: "1", Description: "Potato", Completed: false},
-	{ID: "2", Description: "Onion", Completed: true},
+type vote struct {
+	Target string `json:"target"`
 }
 
 type entry struct {
@@ -54,20 +50,45 @@ func getVoteCount(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, votes)
 }
 
-func postTask(c *gin.Context) {
-	var newTask task
+func postVote(c *gin.Context) {
+	var newVote vote
 
-	if err := c.BindJSON(&newTask); err != nil {
+	if err := c.BindJSON(&newVote); err != nil {
 		return
 	}
 
-	tasks = append(tasks, newTask)
-	c.IndentedJSON(http.StatusCreated, newTask)
+	uuid, err := uuid.NewV4()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to generate uuid: %v\n", err)
+		os.Exit(1)
+	}
+
+	_, err = db.Exec(context.Background(), "INSERT INTO votes(id, target) VALUES($1, $2);", uuid, newVote.Target)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Insert Row failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	c.IndentedJSON(http.StatusCreated, newVote)
 }
 
 func main() {
 	var err error
-	db, err = pgxpool.Connect(context.Background(), os.Getenv("DATABASE_URL"))
+	dbconfig, err := pgxpool.ParseConfig(os.Getenv("DATABASE_URL"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to connect to database: %v\n", err)
+		os.Exit(1)
+	}
+	dbconfig.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		conn.ConnInfo().RegisterDataType(pgtype.DataType{
+			Value: &pgtypeuuid.UUID{},
+			Name:  "uuid",
+			OID:   pgtype.UUIDOID,
+		})
+		return nil
+	}
+
+	db, err = pgxpool.ConnectConfig(context.Background(), dbconfig)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to connect to database: %v\n", err)
 		os.Exit(1)
@@ -75,7 +96,7 @@ func main() {
 
 	router := gin.Default()
 	router.GET("/voteCount", getVoteCount)
-	router.POST("/tasks", postTask)
+	router.POST("/vote", postVote)
 
 	router.Run("0.0.0.0:8080")
 }
