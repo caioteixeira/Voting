@@ -37,6 +37,7 @@ services:
         dockerfile: ./nginx.dockerfile
         context: .
     image: nginx
+    restart: always
     ports:
         - "8080:8080"
     depends_on:
@@ -70,6 +71,7 @@ services:
     restart: always
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/improved
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
     depends_on:
       - db
       - rabbitmq

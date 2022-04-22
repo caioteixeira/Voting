@@ -12,6 +12,8 @@ import (
 	pgtypeuuid "github.com/jackc/pgtype/ext/gofrs-uuid"
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
+
+	"github.com/streadway/amqp"
 )
 
 type vote struct {
@@ -24,6 +26,10 @@ type entry struct {
 }
 
 var db *pgxpool.Pool
+
+var queue amqp.Queue
+
+var connection *amqp.Connection
 
 func getVoteCount(c *gin.Context) {
 	var err error
@@ -91,6 +97,34 @@ func main() {
 	db, err = pgxpool.ConnectConfig(context.Background(), dbconfig)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to connect to database: %v\n", err)
+		os.Exit(1)
+	}
+
+
+	connection, err = amqp.Dial("amqp://guest:guest@rabbitmq:5672/")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to connect to RabbitMQ: %v\n", err)
+		os.Exit(1)
+	}
+	defer connection.Close()
+
+	ch, err := connection.Channel()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to open a channel: %v\n", err)
+		os.Exit(1)
+	}
+	defer ch.Close()
+
+	queue, err = ch.QueueDeclare(
+		"votes-queue", // name
+		true,          // durable
+		false,          // delete when unused
+		false,          // exclusive
+		false,          // no-wait
+		nil,            // arguments
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to declare a queue: %v\n", err)
 		os.Exit(1)
 	}
 
