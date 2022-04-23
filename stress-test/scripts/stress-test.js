@@ -22,5 +22,5 @@ export default function () {
 
     http.post('http://0.0.0.0:8080/vote', payload, params);
 
-    sleep(0.01);
+    sleep(2);
 }

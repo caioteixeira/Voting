@@ -19,7 +19,7 @@ services:
           cpus: '1'
           memory: 1024M
   rabbitmq:
-    image: rabbitmq:3.8-management-alpine
+    image: rabbitmq:3.8-management
     container_name: 'rabbitmq'
     ports:
         - 5672:5672
@@ -43,7 +43,6 @@ services:
     depends_on:
         - "server-1"
         - "server-2"
-        - "server-3"
     networks: 
       - default
   server-1:
@@ -86,26 +85,6 @@ services:
         limits:
           cpus: '1'
           memory: 1024M
-  server-3:
-    build:
-      context: api
-      dockerfile: Dockerfile
-    restart: always
-    environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/improved
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
-    depends_on:
-      - db
-      - rabbitmq
-    ports:
-      - '8083:8080'
-    networks: 
-      - default
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 1024M
   consumer:
     build:
       context: consumer
@@ -123,7 +102,25 @@ services:
       resources:
         limits:
           cpus: '1'
-          memory: 1024M
+          memory: 512MB
+  consumer-2:
+    build:
+      context: consumer
+      dockerfile: Dockerfile
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/improved
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      - db
+      - rabbitmq
+    networks: 
+      - default
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512MB
 volumes:
   db:
     driver: local
