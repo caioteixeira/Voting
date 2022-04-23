@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -20,6 +21,11 @@ type vote struct {
 	Target string `json:"target"`
 }
 
+type voteMessage struct {
+	Target string `json:"target"`
+	ID string `json:"id"`
+}
+
 type entry struct {
 	ID    string `json:"id"`
 	Votes int    `json:"votes"`
@@ -34,6 +40,28 @@ var connection *amqp.Connection
 func getVoteCount(c *gin.Context) {
 	var err error
 	var rows pgx.Rows
+
+	dbconfig, err := pgxpool.ParseConfig(os.Getenv("DATABASE_URL"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to connect to database: %v\n", err)
+		os.Exit(1)
+	}
+	dbconfig.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		conn.ConnInfo().RegisterDataType(pgtype.DataType{
+			Value: &pgtypeuuid.UUID{},
+			Name:  "uuid",
+			OID:   pgtype.UUIDOID,
+		})
+		return nil
+	}
+
+	db, err = pgxpool.ConnectConfig(context.Background(), dbconfig)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to connect to database: %v\n", err)
+		os.Exit(1)
+	}
+
+
 	rows, err = db.Query(context.Background(), "select target, count(*) from votes group by target")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "QueryRow failed: %v\n", err)
@@ -69,39 +97,42 @@ func postVote(c *gin.Context) {
 		os.Exit(1)
 	}
 
-	_, err = db.Exec(context.Background(), "INSERT INTO votes(id, target) VALUES($1, $2);", uuid, newVote.Target)
+	var voteMessage voteMessage
+	voteMessage.ID = uuid.String()
+	voteMessage.Target = newVote.Target
+
+	message, err := json.Marshal(voteMessage)
+
+	ch, err := connection.Channel()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to open a channel: %v\n", err)
+		c.Abort()
+	}
+	defer ch.Close()
+
+	err = ch.Publish("", queue.Name, false, false, amqp.Publishing{
+		DeliveryMode: amqp.Transient,
+		ContentType: "text/plain",
+		Body: message,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to publish message!: %v\n", err)
+		c.Abort()
+	}
+
+	/*_, err = db.Exec(context.Background(), "INSERT INTO votes(id, target) VALUES($1, $2);", uuid, newVote.Target)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Insert Row failed: %v\n", err)
 		os.Exit(1)
-	}
+	}*/
 
 	c.IndentedJSON(http.StatusCreated, newVote)
 }
 
 func main() {
 	var err error
-	dbconfig, err := pgxpool.ParseConfig(os.Getenv("DATABASE_URL"))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to connect to database: %v\n", err)
-		os.Exit(1)
-	}
-	dbconfig.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-		conn.ConnInfo().RegisterDataType(pgtype.DataType{
-			Value: &pgtypeuuid.UUID{},
-			Name:  "uuid",
-			OID:   pgtype.UUIDOID,
-		})
-		return nil
-	}
 
-	db, err = pgxpool.ConnectConfig(context.Background(), dbconfig)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to connect to database: %v\n", err)
-		os.Exit(1)
-	}
-
-
-	connection, err = amqp.Dial("amqp://guest:guest@rabbitmq:5672/")
+	connection, err = amqp.Dial(os.Getenv("RABBITMQ_URL"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to connect to RabbitMQ: %v\n", err)
 		os.Exit(1)
